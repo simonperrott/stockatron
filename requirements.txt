@@ -1,0 +1,13 @@
+scikit-learn
+yfinance
+pandas
+numpy
+scipy
+tensorflow
+keras
+ipython
+jupyter
+six
+matplotlib
+protobuf
+wheel
