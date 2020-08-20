@@ -5,6 +5,16 @@ from sklearn.preprocessing import StandardScaler
 
 
 @dataclass
+class ModelHyperparameters:
+    epochs: int
+    batch_size: int
+    number_hidden_layers: int
+    number_units_in_hidden_layers: int
+    hidden_activation_fn: str
+    optimizer: str
+    dropout: float
+
+@dataclass
 class DataContainer:
     symbol: str
     trained_scaler: StandardScaler
@@ -17,4 +27,10 @@ class DataContainer:
     test_X: pd.DataFrame
     test_y: pd.DataFrame
 
-
+@dataclass
+class ModelDataPrepDetails:
+    trained_scaler: StandardScaler
+    data_prep_hyperparameters: dict
+    features: List[str]
+    model_hyperparameters: ModelHyperparameters
+    accuracy: float
