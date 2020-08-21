@@ -4,56 +4,55 @@ from keras.utils import np_utils
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.utils import resample
 from pandas import concat
-from dtos import DataContainer
+from dtos import DataContainer, DataPrepParams
+import financer as yf
+from datetime import date, timedelta
 
 
 class DataChef:
 
-    def __init__(self, data_prep_hyperparameters, sp500_timeseries:pd.DataFrame, features):
-        self.data_prep_hyperparameters = data_prep_hyperparameters
-        self.sp500_change_ts = self.calculate_price_change_ts(sp500_timeseries)
+    def __init__(self, data_prep_params: DataPrepParams):
+        self.data_prep_params = data_prep_params
+        # Retrieve the S&P 500 Index timeseries data
+        self.start_date = date.today() - timedelta(days=data_prep_params.num_past_days_for_training)
+        sp500_ticker = yf.get_ticker('^GSPC', start_date=self.start_date)
+        self.sp500_change_ts = self.calculate_price_change_ts(sp500_ticker)
+        # Create Lookups for labels
         self.stockActions_to_label = {'Sell': -1, 'Hold': 0, 'Buy': 1}
         self.label_to_stockAction = {v: k for k, v in self.stockActions_to_label.items()}
-        self.scaler = StandardScaler()  # Using Standardization as ditribution is Gaussian (alternative -> MinMaxScaler(feature_range=(-1, 1))
-        self.features = features
 
-    def prepare_prediction_data(self, df:pd.DataFrame, num_time_steps, trained_scaler:StandardScaler):
-        df['change'] = self.calculate_price_change_ts(df)
-        df['sp500_change'] = self.sp500_change_ts
-        df = df.loc[len(df.index) - num_time_steps : , self.features]
-        df = trained_scaler.transform(df)
-        df = self.dataframe_to_supervised(df)
-        return df
 
-    def prepare_model_data(self, symbol, df:pd.DataFrame):
+    def prepare_model_data(self, symbol):
+        df = yf.get_ticker(symbol, start_date=self.start_date)
+        features = self.data_prep_params.features
         # Create x
-        n_features = len(self.features)
+        n_features = len(features)
         df['change'] = self.calculate_price_change_ts(df)
         df['sp500_change'] = self.sp500_change_ts
 
         # Create y
-        df['label'] = self.create_labels(df['change'], self.data_prep_hyperparameters['classification_threshold'])
-        columnsToDrop = [c for c in df.columns if c not in self.features and c != 'label']
+        df['label'] = self.create_labels(df['change'], self.data_prep_params.classification_threshold)
+        columnsToDrop = [c for c in df.columns if c not in features and c != 'label']
         df = df.drop(axis=1, columns=columnsToDrop)
 
         # Split data
         train, validation, test = self.__split_train_validation_test(df, 0.7, 0.15)
 
         # Scale features
-        scaler = StandardScaler()
-        scaler.fit(train[self.features])
-        train[self.features] = scaler.transform(train[self.features].values)
-        validation[self.features] = scaler.transform(validation[self.features].values)
-        test[self.features] = scaler.transform(test[self.features].values)
+        scaler = self.data_prep_params.scaler
+        scaler.fit(train[features])
+        train[features] = scaler.transform(train[features].values)
+        validation[features] = scaler.transform(validation[features].values)
+        test[features] = scaler.transform(test[features].values)
 
         # Create windows of timeseries
-        num_time_steps = self.data_prep_hyperparameters['num_time_steps']
+        num_time_steps = self.data_prep_params.num_time_steps
         train = self.dataframe_to_supervised(train)
         validation = self.dataframe_to_supervised(validation)
         test = self.dataframe_to_supervised(test)
 
         # Balance Training data
-        if self.data_prep_hyperparameters['balance_training_dataset']:
+        if self.data_prep_params.balance_training_dataset:
             train = self.__balance_training_set_by_downsampling(train)
 
         train, validation, test = train.values, validation.values, test.values
@@ -87,9 +86,6 @@ class DataChef:
 
         return DataContainer(
             symbol=symbol,
-            trained_scaler=scaler,
-            num_time_steps=num_time_steps,
-            features=self.features,
             train_X = train_X,
             train_y = train_y,
             val_X = val_X,
@@ -97,6 +93,16 @@ class DataChef:
             test_X=test_X,
             test_y=test_y
         )
+
+
+    def prepare_prediction_data(self, symbol):
+        df = yf.get_ticker(symbol, start_date=self.start_date)
+        df['change'] = self.calculate_price_change_ts(df)
+        df['sp500_change'] = self.sp500_change_ts
+        df = df.loc[len(df.index) - self.data_prep_params.num_time_steps :, self.data_prep_params.features]
+        df = self.data_prep_params.scaler .transform(df)
+        df = self.dataframe_to_supervised(df)
+        return df
 
 
     def create_labels(self, series, threshold: float):
@@ -110,7 +116,7 @@ class DataChef:
         return label_ts
 
     def calculate_price_change_ts(self, df: pd.DataFrame):
-        df['CloseAfterXDays'] = df['Close'].shift(-1 * self.data_prep_hyperparameters['number_days_forward_to_predict'], axis=0)
+        df['CloseAfterXDays'] = df['Close'].shift(-1 * self.data_prep_params.num_days_forward_to_predict, axis=0)
         df.dropna(inplace=True)
         change_series = 100 * (df['CloseAfterXDays'] - df['Open'])/df['Open']
         return change_series
@@ -129,8 +135,8 @@ class DataChef:
         """
         cols, names = list(), list()
         # input sequence (t-n, ... t-1)
-        n_timesteps = self.data_prep_hyperparameters['num_time_steps']
-        feature_cols = self.features
+        n_timesteps = self.data_prep_params.num_time_steps
+        feature_cols = self.data_prep_params.features
         for i in range(n_timesteps, 0, -1):
             cols.append(df[feature_cols].shift(i))
             names += [f'{c}(t-{i})' for c in feature_cols]

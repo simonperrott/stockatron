@@ -1,14 +1,14 @@
 import os
-from datetime import date, timedelta
+import pathlib
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import StandardScaler
 from tensorflow.python.keras.models import load_model
 from data_chef import DataChef
-from dtos import ModelDataPrepDetails
+from dtos import DataPrepParams, ModelHyperparameters, ModelDescription
 from trainer import Trainer
-import financer as yf
 from pickle import dump, load
+from datetime import date
+import glob
 
 
 class Orchestrator:
@@ -16,83 +16,73 @@ class Orchestrator:
     def __init__(self, symbols):
         self.symbols = symbols
 
-    def train_models(self, data_prep_hyperparameters, features, model_hyperparameters):
-
-        # Retrieve the S&P 500 Index timeseries data & use it to initialise our DataChef which will prepare the data for our LSTM model
-        sp500_ticker = yf.get_ticker('^GSPC')
-        data_chef = DataChef(data_prep_hyperparameters, sp500_ticker, features)
+    def train_models(self, data_prep_params: DataPrepParams, model_hyperparameters: ModelHyperparameters):
+        data_chef = DataChef(data_prep_params)
 
         # Create a model for each stock ticker symbol
         for symbol in self.symbols:
-            raw_stock_data = yf.get_ticker(symbol)
-            data_container = data_chef.prepare_model_data(symbol, raw_stock_data)
-            trainer = Trainer(data_container)
-            model, accuracy, hyperparameters = trainer.train_model(model_hyperparameters)
-            print(f'{symbol} has model accuracy: {accuracy}')
-
-            model_version = f'{symbol}_{date.today().strftime("%Y-%m-%d")}_model.h5v'
-            model.save(os.path.join('models', model_version))
-            dump(ModelDataPrepDetails(
-                    trained_scaler=data_container.trained_scaler,
-                    data_prep_hyperparameters=data_prep_hyperparameters,
-                    features=features,
-                    model_hyperparameters=hyperparameters,
-                    accuracy=accuracy),
-                open(os.path.join('params', f'{symbol}_{date.today().strftime("%Y-%m-%d")}_scaler.pkl'), 'wb'))
+            # Get a timeseries of data in right shape for LSTM training
+            data = data_chef.prepare_model_data(symbol)
+            data_input_shape = (data_prep_params.num_time_steps, len(data_prep_params.features))
+            # Train
+            trainer = Trainer(data, data_input_shape)
+            model, model_descr = trainer.train_model(model_hyperparameters)
+            if model and model_descr:
+                print(f'Model created for {symbol} with  accuracy: {model_descr.accuracy}')
+                path_to_new_model = f'models/{model_descr.model_version}'
+                pathlib.Path(path_to_new_model).mkdir(exist_ok=True)
+                model.save(os.path.join(path_to_new_model, f'model_{model_descr.model_version}.h5v'))
+                dump(model_descr, open(os.path.join(path_to_new_model, f'model_details_{model_descr.model_version}.pkl'), 'wb'))
+                dump(data_prep_params, open(os.path.join(path_to_new_model, f'data_prep_params_{model_descr.model_version}.pkl'), 'wb'))
 
 
     def make_predictions(self):
         for symbol in self.symbols:
-            latest_model_file = self.get_lastest_file('models', f'{symbol}')
-            latest_model_params_file = self.get_lastest_file('model-params', f'{symbol}')
 
-            model = load_model(latest_model_file)
+            latest_model_file = self.get_lastest_file('models', f'model_{symbol}')
+            latest_model_details_file = self.get_lastest_file('models', f'model_details_{symbol}')
+            latest_data_prep_params_file = self.get_lastest_file('models', f'data_prep_params_{symbol}')
 
-            model_params = load(open(latest_model_params_file, 'rb'))
-            num_time_steps = model_params.data_prep_hyperparameters['num_time_steps']
-            features = model_params.features
+            if latest_model_file and latest_model_details_file and latest_data_prep_params_file:
+                model = load_model(latest_model_file)
+                model_descr: ModelDescription = load(open(latest_model_details_file, 'rb'))
+                data_params: DataPrepParams = load(open(latest_data_prep_params_file, 'rb'))
 
-            month_ago_date = date.today() - timedelta(days=30)
-            sp500_ticker = yf.get_ticker('^GSPC', start= month_ago_date)
-            ticker_past_month = yf.get_ticker(symbol, start=month_ago_date)
+                data_params.num_past_days_for_training = 30
+                data_chef = DataChef(data_params)
+                prediction_input = data_chef.prepare_prediction_data(symbol)
+                x = prediction_input.reshape(1, data_params.num_time_steps, len(data_params.features))
+                prediction = np.argmax(model.make_predictions(x), axis=-1)[0]
+                print(f'{symbol} expected to be: {prediction} in {data_params.num_days_forward_to_predict} days')
 
-            data_chef = DataChef(model_params.data_prep_hyperparameters, sp500_ticker, features)
+                self.record_run(symbol, model_descr, prediction, data_params)
+                #self.record_actual_results()
 
-            prediction_input = data_chef.prepare_prediction_data(ticker_past_month, model_params.scaler)
-            x = prediction_input.reshape(1, num_time_steps, len(features))
-            prediction = np.argmax(model.make_predictions(x), axis=-1)[0]
-            number_days_forward_to_predict = model_params.data_prep_hyperparameters['number_days_forward_to_predict']
-            print(f'{symbol} expected to be: {prediction} in {number_days_forward_to_predict} days')
-
-            ticker_past_month['change'] = data_chef.calculate_price_change_ts(ticker_past_month)
-            ticker_past_month['label'] = data_chef.create_labels(ticker_past_month['change'])
-            last_actual_label = ticker_past_month.tail(1)['label']
-            self.record_run(symbol, latest_model_file, prediction, last_actual_label, number_days_forward_to_predict, model_params.accuracy)
 
     # Returns the name of the latest file containing the substring
     @staticmethod
     def get_lastest_file(path, file_name_substring):
-        files = os.listdir(path)
-        paths = [os.path.join(path, basename) for basename in files if file_name_substring in basename]
-        return max(paths, key=os.path.getctime)
+        list_of_files = glob.glob(f'{path}/**/{file_name_substring}*', recursive=True)
+        latest_file = max(list_of_files, key=os.path.getctime)
+        return latest_file
 
     @staticmethod
-    def record_run(symbol, model_version, prediction, last_actual_label, prediction_period, accuracy):
-        file_dir = 'stockatron_runs'
-        file_name = 'stock_predictions.csv'
+    def record_run(symbol,  model_descr, prediction):
+        file_dir = 'runs'
+        file_name = 'stockatron_runs.csv'
         stats_file = os.path.join(file_dir, file_name)
 
-        data = {'Symbol': symbol, 'Date': date.today().strftime("%Y-%m-%d"), 'Model': model_version, 'Prediction': prediction}
+        data = {'Symbol': symbol, 'Date': date.today().strftime("%Y-%m-%d"), 'Model': model_descr.model_version, 'Accuracy': model_descr.accuracy, 'Prediction': prediction}
 
         if os.path.exists(stats_file):
             results_df = pd.read_csv(stats_file)
-            if len(results_df.index) > 5:
+            results_df.append(data, ignore_index=True)
+            results_df.to_csv(stats_file)
+            '''if len(results_df.index) > 5:
                 rowToUpdate = results_df.iloc[len(results_df.index) - prediction_period]
                 rowToUpdate['Actual'] = last_actual_label
-            results_df.append(data, ignore_index=True)
-        else:
-            results_df = pd.DataFrame.from_records([data])
-            results_df.to_csv(stats_file)
+            '''
+
 
 
 
