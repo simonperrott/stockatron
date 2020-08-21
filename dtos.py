@@ -1,8 +1,6 @@
 from dataclasses import dataclass
-from typing import List
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
-from tensorflow.python.keras.models import Sequential
 
 
 @dataclass
@@ -38,7 +36,6 @@ class DataContainer:
 
 @dataclass
 class ModelDescription:
-    model: Sequential
     model_version: str
     model_hyperparameters: ModelHyperparameters
     accuracy: float

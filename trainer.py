@@ -47,26 +47,24 @@ class Trainer:
                 # Run for longer (more epochs) if underfitting (validation loss is still decreasing):
                 elif history.history['val_loss'][last_index] + 0.1 < history.history['val_loss'][round(last_index * 0.9)]:
                     model_hyperparameters.epochs = round(last_index * 1.5)
-                # Increase dropout if overfitting ('val_loss' much higher than training 'loss'):
-                elif history.history['val_loss'][last_index] - history.history['loss'][last_index] > 0.2:
-                    model_hyperparameters.dropout = model_hyperparameters.dropout * 1.5
                 # Stop sooner (less epochs) if validation loss is increasing:
-                elif history.history['val_loss'][last_index] + 0.1 > history.history['val_loss'][round(last_index *2/3)]:
-                    model_hyperparameters.epochs = round(last_index *2/3)
+                elif model_hyperparameters.epochs > 100 and  history.history['val_loss'][last_index] + 0.1 > history.history['val_loss'][
+                    round(last_index / 2)]:
+                    model_hyperparameters.epochs = round(last_index * 2 / 3)
+                # Increase dropout if overfitting ('val_loss' much higher than training 'loss'):
+                elif model_hyperparameters.dropout < 0.5 and history.history['val_loss'][last_index] - history.history['loss'][last_index] > 0.2:
+                    model_hyperparameters.dropout = model_hyperparameters.dropout * 2
                 # If still not meeting accuracy then add another hidden layer
-                elif model_hyperparameters.number_hidden_layers < 3:
-                    model_hyperparameters.number_hidden_layers += 1
-                # Last attempt is to increase the number of nodes in the first layer
                 else:
-                    model_hyperparameters.number_units_in_first_layer *= 2
+                    model_hyperparameters.number_hidden_layers += 1
                 self.train_model(model_hyperparameters)
             else:
                 return None, None
-
-        return model, ModelDescription(model_version=self.model_version,
-                                       model_hyperparameters=model_hyperparameters,
-                                       accuracy=accuracy,
-                                       number_of_trainings=self.number_of_trainings)
+        else:
+            return model, ModelDescription(model_version=self.model_version,
+                                           model_hyperparameters=model_hyperparameters,
+                                           accuracy=accuracy,
+                                           number_of_trainings=self.number_of_trainings)
 
 
     def create_network_topology(self, model_hyperparameters):
