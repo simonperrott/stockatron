@@ -24,6 +24,7 @@ class ModelHyperparameters:
     hidden_activation_fn: str
     optimizer: str
     dropout: float
+    kernel_initializer: str
 
 @dataclass
 class DataContainer:

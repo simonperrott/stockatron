@@ -1,8 +1,6 @@
 import pathlib
-import sys
 import numpy as np
 from sklearn.preprocessing import StandardScaler
-
 from dtos import ModelHyperparameters, DataPrepParams
 from orchestrator import Orchestrator
 
@@ -26,12 +24,13 @@ def main():
 
         model_hyperparameters = ModelHyperparameters(
             epochs=300,
-            batch_size=375, # non-stateful LSTM's only keep state/context within a batch so I'm using a batch size that covers the past 18 months of trading days.
+            batch_size=30, # non-stateful LSTM's only keep state/context within a batch so I'll start by using a batch size that covers the past 30 trading days.
             number_hidden_layers= 2,
-            number_units_in_hidden_layers=50,
+            number_units_in_hidden_layers=25,
             hidden_activation_fn='tanh',
             optimizer='adam',
-            dropout=0.2
+            dropout=0.2,
+            kernel_initializer="glorot_uniform"
         )
         orchestrator.train_models(data_prep_params, model_hyperparameters)
 

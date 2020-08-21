@@ -34,6 +34,7 @@ class Orchestrator:
                 model.save(os.path.join(path_to_new_model, f'model_{model_descr.model_version}.h5v'))
                 dump(model_descr, open(os.path.join(path_to_new_model, f'model_details_{model_descr.model_version}.pkl'), 'wb'))
                 dump(data_prep_params, open(os.path.join(path_to_new_model, f'data_prep_params_{model_descr.model_version}.pkl'), 'wb'))
+            # else we couldn't find an accurate model even by changing hyperparams so get more data - TODO: Upsample if not enough data in the smallest group
 
 
     def make_predictions(self):
