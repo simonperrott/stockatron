@@ -10,7 +10,7 @@ def main():
     pathlib.Path('stockatron_runs').mkdir(exist_ok=True)
     np.random.seed(1)
 
-    orchestrator = Orchestrator(['APTV', 'BILI', 'BIDU', 'IKA.L', 'GOOG', 'ERIC', 'TM', 'LULU' ])
+    orchestrator = Orchestrator(['BILI', 'BIDU', 'GOOG']) #['APTV', 'BILI', 'BIDU', 'IKA.L', 'GOOG', 'ERIC', 'TM', 'LULU', 'PICK', 'NIO', 'PYPL', 'SQ'])
 
     do_training = True
     if do_training:

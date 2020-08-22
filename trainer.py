@@ -38,34 +38,49 @@ class Trainer:
         # Check model is fit for purpose
         if accuracy < self.model_accuracy_threshold:
             if self.number_of_trainings < self.max_trainings:
-                # Change one hyperparameter and retrain
-                last_index = model_hyperparameters.epochs-1
-                # Use more samples to estimate gradient error (increase Batch Size) if accuracy is jumping around:
-                if max(abs(history.history['accuracy'][last_index] - history.history['accuracy'][round(last_index-1)]),
-                       abs(history.history['accuracy'][last_index-1] - history.history['accuracy'][round(last_index-2)])) > 0.05:
-                    model_hyperparameters.batch_size *= 2
-                # Run for longer (more epochs) if underfitting (validation loss is still decreasing):
-                elif history.history['val_loss'][last_index] + 0.1 < history.history['val_loss'][round(last_index * 0.9)]:
-                    model_hyperparameters.epochs = round(last_index * 1.5)
-                # Stop sooner (less epochs) if validation loss is increasing:
-                elif model_hyperparameters.epochs > 100 and  history.history['val_loss'][last_index] + 0.1 > history.history['val_loss'][
-                    round(last_index / 2)]:
-                    model_hyperparameters.epochs = round(last_index * 2 / 3)
-                # Increase dropout if overfitting ('val_loss' much higher than training 'loss'):
-                elif model_hyperparameters.dropout < 0.5 and history.history['val_loss'][last_index] - history.history['loss'][last_index] > 0.2:
-                    model_hyperparameters.dropout = model_hyperparameters.dropout * 2
-                # If still not meeting accuracy then add another hidden layer
-                else:
-                    model_hyperparameters.number_hidden_layers += 1
+                self.tune_hyperparameters(history, model_hyperparameters)
                 self.train_model(model_hyperparameters)
             else:
-                return None, None
+                return None
         else:
             return model, ModelDescription(model_version=self.model_version,
                                            model_hyperparameters=model_hyperparameters,
                                            accuracy=accuracy,
                                            number_of_trainings=self.number_of_trainings)
 
+
+    @staticmethod
+    def tune_hyperparameters(history, hyperparams):
+        # Change one hyperparameter at a time and retrain
+        last_index = hyperparams.epochs - 1
+        h = history.history
+
+        # If overfitting ('val_loss' much higher than training 'loss') then increase dropout or remove a hidden layer if still overfitting with high dropout:
+        if h['val_loss'][last_index] - h['loss'][last_index] > 0.2:
+            if hyperparams.dropout < 0.6:
+                hyperparams.dropout = hyperparams.dropout * 2
+            elif hyperparams.number_hidden_layers > 1:
+                hyperparams.number_hidden_layers -= 1
+            else:
+                hyperparams.number_units_in_hidden_layers /= 2
+
+        # If validation loss still decreasing then run for longer (more epochs):
+        elif h['val_loss'][last_index] + 0.1 < h['val_loss'][round(last_index * 0.9)]:
+            hyperparams.epochs = round(last_index * 1.5)
+
+        # If validation loss is increasing then Stop sooner (less epochs):
+        elif hyperparams.epochs > 100 and h['val_loss'][last_index] + 0.1 > h['val_loss'][round(last_index / 2)]:
+            hyperparams.epochs = round(last_index / 2)
+
+        # If accuracy is jumping around then use more samples to estimate gradient error (i.e. increase Batch Size):
+        elif max(abs(h['accuracy'][last_index] - h['accuracy'][round(last_index - 1)]),
+                 abs(h['accuracy'][last_index - 1] - h['accuracy'][
+                     round(last_index - 2)])) > 0.05:
+            hyperparams.batch_size *= 2
+
+        # Lastly try more units in hidden layer
+        else:
+            hyperparams.number_units_in_hidden_layers *= 2
 
     def create_network_topology(self, model_hyperparameters):
         # Create Network Topography
@@ -89,7 +104,6 @@ class Trainer:
         # The Output layer
         model.add(Dense(3, activation='softmax'))
         model.compile(loss='categorical_crossentropy', optimizer=model_hyperparameters.optimizer, metrics=['accuracy'])
-        print(model.summary())
         return model
 
 

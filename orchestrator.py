@@ -26,8 +26,9 @@ class Orchestrator:
             data_input_shape = (data_prep_params.num_time_steps, len(data_prep_params.features))
             # Train
             trainer = Trainer(data, data_input_shape)
-            model, model_descr = trainer.train_model(model_hyperparameters)
-            if model and model_descr:
+            training_result = trainer.train_model(model_hyperparameters)
+            if training_result:
+                model, model_descr = training_result
                 print(f'Model created for {symbol} with  accuracy: {model_descr.accuracy}')
                 path_to_new_model = f'models/{model_descr.model_version}'
                 pathlib.Path(path_to_new_model).mkdir(exist_ok=True)
@@ -76,13 +77,18 @@ class Orchestrator:
         data = {'Symbol': symbol, 'Date': date.today().strftime("%Y-%m-%d"), 'Model': model_descr.model_version, 'Accuracy': model_descr.accuracy, 'Prediction': prediction}
 
         if os.path.exists(stats_file):
-            results_df = pd.read_csv(stats_file)
-            results_df.append(data, ignore_index=True)
-            results_df.to_csv(stats_file)
-            '''if len(results_df.index) > 5:
-                rowToUpdate = results_df.iloc[len(results_df.index) - prediction_period]
-                rowToUpdate['Actual'] = last_actual_label
-            '''
+            df = pd.read_csv(stats_file)
+        else:
+            columns = ['Symbol', 'Date', 'Model', 'actual_amount', 'Accuracy', 'Prediction', 'Actual']
+            df = pd.DataFrame(columns=columns)
+
+        df.append(data, ignore_index=True)
+        df.to_csv(stats_file)
+
+        '''if len(results_df.index) > 5:
+            rowToUpdate = results_df.iloc[len(results_df.index) - prediction_period]
+            rowToUpdate['Actual'] = last_actual_label
+        '''
 
 
 
