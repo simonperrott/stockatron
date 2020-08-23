@@ -99,8 +99,8 @@ class DataChef:
         df = yf.get_ticker(symbol, start_date=self.start_date)
         df['change'] = self.calculate_price_change_ts(df)
         df['sp500_change'] = self.sp500_change_ts
-        df = df.loc[len(df.index) - self.data_prep_params.num_time_steps :, self.data_prep_params.features]
-        df = self.data_prep_params.scaler .transform(df)
+        df = df.tail(self.data_prep_params.num_time_steps+4)[self.data_prep_params.features]
+        df[self.data_prep_params.features] = self.data_prep_params.scaler.transform(df)
         df = self.dataframe_to_supervised(df)
         return df
 
@@ -123,6 +123,7 @@ class DataChef:
 
     @staticmethod
     def __split_train_validation_test(df, train_fraction, val_fraction):
+        # For timeseries predictions must AVOID 'look-ahead' bias. i.e. in a timeseries the observations are related so train with "old observations" and test with "new observations"
         train, validate, test = np.split(df, [int(train_fraction * len(df)), int((train_fraction + val_fraction) * len(df))])
         return train, validate, test
 
@@ -143,13 +144,13 @@ class DataChef:
 
         df_ts = concat(cols, axis=1)
         df_ts.columns = names
-        # add label column
-        cols.append(df['label'])
-        names.append('label')
+        if 'label' in df.columns.values:
+            cols.append(df['label'])
+            names.append('label')
         agg = concat(cols, axis=1)
         agg.columns = names
         agg.dropna(inplace=True)
-        return agg
+        return agg.tail(1)
 
     @staticmethod
     def __balance_training_set_by_downsampling(df_train):
