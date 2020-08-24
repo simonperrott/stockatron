@@ -1,94 +1,51 @@
+import operator
 import sys
+from operator import attrgetter
 import numpy as np
 from matplotlib import pyplot
 from keras.models import Sequential
 from keras.layers import Dense, Flatten, LSTM, Dropout
-from dtos import DataContainer, ModelDescription
-from datetime import date
+from dtos import DataContainer, ModelContainer, ModelHyperparameters, DataPrepParameters
 
 
 class Trainer:
 
-    def __init__(self, data: DataContainer, data_input_shape, max_trainings = 5, model_accuracy_threshold = 0.65):
-        self.data_input_shape = data_input_shape
-        self.model_accuracy_threshold = model_accuracy_threshold
-        self.data = data
-        self.max_trainings = max_trainings
-        self.number_of_trainings = 0
-        self.model_version = f'{data.symbol}_{date.today().strftime("%Y-%m-%d")}'
+    def __init__(self):
+        self.trained_models = []
+        self.num_trainings = 0
 
-    def train_model(self, model_hyperparameters):
+    def train_model(self, data_prep_params:DataPrepParameters, data: DataContainer, hyperparams: ModelHyperparameters):
         """A recursive function that will keep adjusting model hyperparameters until a model with accuracy > 60% is found or give up after 6 attenmpts"""
 
-        model = self.create_network_topology(model_hyperparameters)
-        history = model.fit(self.data.train_X,
-                            self.data.train_y,
-                            epochs=model_hyperparameters.epochs,
-                            batch_size=model_hyperparameters.batch_size,
-                            validation_data=(self.data.val_X, self.data.val_y),
+        input_shape = (data_prep_params.num_time_steps, len(data_prep_params.features))
+        model = self.create_network_topology(hyperparams, input_shape)
+        history = model.fit(data.train_X,
+                            data.train_y,
+                            epochs=hyperparams.epochs,
+                            batch_size=hyperparams.batch_size,
+                            validation_data=(data.val_X, data.val_y),
                             verbose=0,
                             shuffle=False)
-        self.number_of_trainings += 1
+        self.num_trainings += 1
+        val_accuracy = history.history['val_accuracy'][hyperparams.epochs - 1]
+
+        self.trained_models.append(ModelContainer(model=model,
+                                                  data_prep_params=data_prep_params,
+                                                  hyperparameters=hyperparams,
+                                                  val_accuracy=val_accuracy))
+        print(f'Timesteps: {data_prep_params.num_time_steps} with Batch size: {hyperparams.batch_size}, epochs: {hyperparams.epochs} & dropout: {hyperparams.dropout} -> Val Accuracy: {val_accuracy:.2f}')
         #self.plot_model_loss(history)
 
-        # evaluate model against an unseen test set
-        _, accuracy = model.evaluate(self.data.test_X, self.data.test_y)
-        print(f'On run {self.number_of_trainings} Accuracy = {accuracy:.2f}')
-
-        # Check model is fit for purpose
-        if accuracy < self.model_accuracy_threshold:
-            if self.number_of_trainings < self.max_trainings:
-                self.tune_hyperparameters(history, model_hyperparameters)
-                self.train_model(model_hyperparameters)
-            else:
-                return None
+        if self.num_trainings < 2:
+            self.tune_hyperparameters(history, hyperparams)
+            self.train_model(data_prep_params, data, hyperparams)
         else:
-            return model, ModelDescription(model_version=self.model_version,
-                                           model_hyperparameters=model_hyperparameters,
-                                           accuracy=accuracy,
-                                           number_of_trainings=self.number_of_trainings)
+            best_model = max(self.trained_models, key=operator.attrgetter("val_accuracy"))
+            return best_model
 
 
     @staticmethod
-    def tune_hyperparameters(history, hyperparams):
-        # Change one hyperparameter at a time and retrain
-        h = history.history
-        last_index = hyperparams.epochs - 1
-        epoch_of_min_loss = np.argmin(h['val_loss'])
-
-        # If validation loss is still decreasing then run for more epochs (i.e. it's currently underfitting)
-        if h['val_loss'][last_index] - h['val_loss'][round(last_index * 0.9)] > 0.1 \
-                and h['val_loss'][last_index] - h['val_loss'][round(last_index * 0.95)] > 0.075:
-            hyperparams.epochs = round(last_index * 1.5)
-
-        # Changing Batch size
-        # In non-stateful LSTMs state is maintyained within a batch and only reset after each batch.
-        # Compare validation accuracy with both smaller & larger batch sizes
-
-        # If validation loss has levelled but is too high we can make try making our model deeper (i.e. it's currently underfitting)
-        elif hyperparams.number_hidden_layers < 3 \
-            and h['val_loss'][last_index] - h['val_loss'][round(last_index * 0.9)] < 0.05 \
-            and h['val_loss'][last_index] - h['val_loss'][round(last_index * 0.95)] < 0.05:
-            hyperparams.number_hidden_layers += 1
-
-        # If overfitting with an inflexion point where validation loss has started increasing then stop at the inflexion point
-        elif h['val_loss'][last_index] - h['val_loss'][epoch_of_min_loss] > 0.15:
-            hyperparams.epochs = last_index
-
-        # If big difference between validation loss and training loss where validation loss is lowest then incerase dropout
-        elif h['loss'][epoch_of_min_loss] - h['val_loss'][epoch_of_min_loss] > 0.15:
-            hyperparams.dropout = hyperparams.dropout * 1.5
-
-        # If loss is jumping around then use more samples to estimate gradient error (i.e. increase Batch Size):
-        elif max(abs(h['loss'][last_index] - h['loss'][round(last_index - 1)]),
-                 abs(h['loss'][last_index - 1] - h['loss'][round(last_index - 2)])) > 0.05:
-            hyperparams.batch_size *= 2
-
-        # Could try more tuning here but for moment will just rerun as LSTM is stochastic in nature so result will vary and interesting to see how it varies
-        else:
-            pass
-
-    def create_network_topology(self, model_hyperparameters):
+    def create_network_topology(model_hyperparameters, data_input_shape):
         # Create Network Topography
         model = Sequential()
         # First hidden layer
@@ -96,7 +53,7 @@ class Trainer:
                        activation=model_hyperparameters.hidden_activation_fn,
                        dropout=model_hyperparameters.dropout,
                        return_sequences=True if model_hyperparameters.number_hidden_layers > 1 else False,
-                       input_shape=self.data_input_shape,
+                       input_shape=data_input_shape,
                        kernel_initializer=model_hyperparameters.kernel_initializer))
         # model.add(Dropout(model_hyperparameters.dropout))
         # Other hidden layers
@@ -112,6 +69,33 @@ class Trainer:
         model.compile(loss='categorical_crossentropy', optimizer=model_hyperparameters.optimizer, metrics=['accuracy'])
         return model
 
+    @staticmethod
+    def tune_hyperparameters(history, hyperparams):
+        # Change one hyperparameter at a time and retrain
+        h = history.history
+        last_index = hyperparams.epochs - 1
+        epoch_of_min_loss = np.argmin(h['val_loss'])
+
+        # If validation loss is still decreasing then run for more epochs (i.e. it's currently underfitting)
+        if h['val_loss'][last_index] - h['val_loss'][round(last_index * 0.9)] > 0.1 \
+                and h['val_loss'][last_index] - h['val_loss'][round(last_index * 0.95)] > 0.075:
+            hyperparams.epochs = round(last_index * 1.5)
+
+        # If overfitting with an inflexion point where validation loss has started increasing then stop at the inflexion point
+        elif h['val_loss'][last_index] - h['val_loss'][epoch_of_min_loss] > 0.15:
+            hyperparams.epochs = last_index
+
+        # If big difference between validation loss and training loss where validation loss is lowest then incerase dropout
+        elif h['loss'][epoch_of_min_loss] - h['val_loss'][epoch_of_min_loss] > 0.1:
+            hyperparams.dropout = round(hyperparams.dropout * 1.5, 2)
+
+        # try making our model deeper
+        else:
+            hyperparams.number_hidden_layers += 1
+
+    def reset(self):
+        self.num_trainings = 0
+        self.trained_models = []
 
     @staticmethod
     def plot_model_loss(history):

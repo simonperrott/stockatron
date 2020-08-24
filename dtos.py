@@ -1,17 +1,8 @@
 from dataclasses import dataclass
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
+from tensorflow.python.keras.models import Sequential
 
-
-@dataclass
-class DataPrepParams:
-    num_past_days_for_training: int
-    num_time_steps: int
-    num_days_forward_to_predict: int
-    classification_threshold: float
-    balance_training_dataset: bool
-    scaler: StandardScaler
-    features: list
 
 @dataclass
 class ModelHyperparameters:
@@ -25,8 +16,13 @@ class ModelHyperparameters:
     kernel_initializer: str
 
 @dataclass
+class DataPrepParameters:
+    num_time_steps: int
+    features: []
+    scaler: StandardScaler
+
+@dataclass
 class DataContainer:
-    symbol: str
     train_X: pd.DataFrame
     train_y: pd.DataFrame
     val_X: pd.DataFrame
@@ -35,8 +31,10 @@ class DataContainer:
     test_y: pd.DataFrame
 
 @dataclass
-class ModelDescription:
-    model_version: str
-    model_hyperparameters: ModelHyperparameters
-    accuracy: float
-    number_of_trainings: int
+class ModelContainer:
+    model: Sequential
+    hyperparameters: ModelHyperparameters
+    val_accuracy: float
+    data_prep_params: DataPrepParameters
+    test_accuracy: float = 0.0
+    version: str = None
