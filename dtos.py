@@ -1,3 +1,4 @@
+import enum
 from dataclasses import dataclass
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
@@ -34,7 +35,15 @@ class DataContainer:
 class ModelContainer:
     model: Sequential
     hyperparameters: ModelHyperparameters
-    val_accuracy: float
+    train_score: float
     data_prep_params: DataPrepParameters
-    test_accuracy: float = 0.0
+    data: DataContainer
     version: str = None
+    val_score: float = 0.0
+    test_score: float = 0.0
+
+class Metric(enum.Enum):
+    precision = 1
+    recall = 2
+    f1_score = 3
+    accuracy = 4

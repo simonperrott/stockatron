@@ -12,11 +12,13 @@ class DataChef:
     def __init__(self, sp500_df: pd.DataFrame, num_days_forward_to_predict):
         #self.data_prep_params = data_prep_params
         self.num_days_forward_to_predict = num_days_forward_to_predict
-        self.labelling_threshold = 10.0
+        self.labelling_positive_threshold = 10.0
+        self.labelling_negative_threshold = 5.0
         self.sp500_daily_changes = self.calculate_price_change_ts(sp500_df)
         # Create Lookups for labels
         self.stockActions_to_label = {'Sell': -1, 'Hold': 0, 'Buy': 1}
         self.label_to_stockAction = {v: k for k, v in self.stockActions_to_label.items()}
+        self.index_to_value = {i: v for i, (k, v) in enumerate(self.stockActions_to_label.items())}
 
 
     def prepare_model_data(self, df, data_prep_params):
@@ -31,7 +33,7 @@ class DataChef:
         df = df.drop(axis=1, columns=columnsToDrop)
 
         # Split data
-        train, validation, test = self.__split_train_validation_test(df, 0.65, 0.2)
+        train, validation, test = self.__split_train_validation_test(df, 0.8, 0.1)
 
         # Scale features
         data_prep_params.scaler.fit(train[features])
@@ -44,11 +46,7 @@ class DataChef:
         train = self.dataframe_to_supervised(train, steps, features)
         validation = self.dataframe_to_supervised(validation, steps, features)
         test = self.dataframe_to_supervised(test, steps, features)
-
-        # Balance Training data
-        train = self.__balance_training_set_by_downsampling(train)
         train, validation, test = train.values, validation.values, test.values
-
         train_X, train_y =  train[:, :-1], train[:, -1]
         val_X, val_y = validation[:, :-1], validation[:, -1]
         test_X, test_y = test[:, :-1], test[:, -1]
@@ -92,7 +90,7 @@ class DataChef:
         df['sp500_change'] = self.sp500_daily_changes
         df = df.tail(num_time_steps+4)[features]
         df[features] = scaler.transform(df)
-        latest_row = self.dataframe_to_supervised(df).tail(1)
+        latest_row = self.dataframe_to_supervised(df, num_time_steps, features).tail(1)
         return latest_row
 
 
@@ -101,8 +99,8 @@ class DataChef:
         # 1 Buy => % Change > +ve threshold
         # -1 Sell => % Change < -ve threshold
         label_ts = series.apply(
-            lambda x: self.stockActions_to_label['Buy'] if x > self.labelling_threshold
-            else self.stockActions_to_label['Sell'] if x < -1 * self.labelling_threshold
+            lambda x: self.stockActions_to_label['Buy'] if x > self.labelling_positive_threshold
+            else self.stockActions_to_label['Sell'] if x < -1 * self.labelling_negative_threshold
             else self.stockActions_to_label['Hold'])
         return label_ts
 
@@ -147,6 +145,7 @@ class DataChef:
     @staticmethod
     def __balance_training_set_by_downsampling(df_train):
         label_groupings = df_train['label'].value_counts()
+        print(label_groupings)
         min_label_count = label_groupings.min()
         df_list = []
         # Separate by label

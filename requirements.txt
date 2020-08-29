@@ -1,3 +1,4 @@
+imblearn
 scikit-learn
 yfinance
 pandas
