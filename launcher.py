@@ -14,7 +14,7 @@ def main():
     core = StockatronCore(start_date=date.today() - timedelta(days=20 * 365))
 
     do_training = False
-    for stock in ['GOOG', 'NIO']:
+    for stock in ['NIO', 'PYPL', 'AMBA']:
         if do_training:
             core.train_model(symbol=stock)
 

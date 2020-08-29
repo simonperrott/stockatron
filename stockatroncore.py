@@ -49,7 +49,7 @@ class StockatronCore:
                 # Check for High Bias / Underfitting
                 if train_score < 0.8: # increase complexity of model by adding more layers and running for longer
                     hyperparams.number_hidden_layers += 1
-                    hyperparams.epochs *=2
+                    hyperparams.epochs *=3
                     model = trainer.train_model(data_prep_params, data.train_X, data.train_y, hyperparams)
                     train_score = ModelEvaluator.evaluate(model, data.train_X, data.train_y, self.metric)
                 models.append(ModelContainer(model=model, hyperparameters=hyperparams, data_prep_params=data_prep_params, data=data, train_score=train_score))
@@ -110,11 +110,10 @@ class StockatronCore:
 
         if os.path.exists(stats_file):
             df = pd.read_csv(stats_file)
+            df.append(data, ignore_index=True)
         else:
-            columns = ['Symbol', 'Run Date', 'Model', 'Model Test Score', 'Prediction', 'Actual']
-            df = pd.DataFrame(columns=columns)
+            df = pd.DataFrame(data, index=[0])
 
-        df.append(data, ignore_index=True)
         df.to_csv(stats_file)
 
     @staticmethod

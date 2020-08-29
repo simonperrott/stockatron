@@ -24,7 +24,7 @@ class Trainer:
                             verbose=0,
                             shuffle=False)
         accuracy = history.history['accuracy'][hyperparams.epochs - 1]
-        print(f'Timesteps: {data_prep_params.num_time_steps} with Batch size: {hyperparams.batch_size}, epochs: {hyperparams.epochs} & dropout: {hyperparams.dropout} -> Accuracy: {accuracy:.2f}')
+        print(f'Timesteps: {data_prep_params.num_time_steps} with Batch size: {hyperparams.batch_size}, epochs: {hyperparams.epochs} & dropout: {hyperparams.dropout} ->')
         Trainer.plot_model_loss(history)
         return model
 
