@@ -14,7 +14,7 @@ class DataChef:
         self.num_days_forward_to_predict = num_days_forward_to_predict
         self.labelling_positive_threshold = 10.0
         self.labelling_negative_threshold = 5.0
-        self.sp500_daily_changes = self.calculate_price_change_ts(sp500_df)
+        self.sp500_df = sp500_df
         # Create Lookups for labels
         self.stockActions_to_label = {'Sell': -1, 'Hold': 0, 'Buy': 1}
         self.label_to_stockAction = {v: k for k, v in self.stockActions_to_label.items()}
@@ -23,11 +23,10 @@ class DataChef:
 
     def prepare_model_data(self, df, data_prep_params):
         # Create x
-        df['change'] = self.calculate_price_change_ts(df)
-        df['sp500_change'] = self.sp500_daily_changes
-
+        df['change'] = 100 * (df['Close'] - df['Open'])/df['Open']
+        df['sp500_change'] = 100 * (self.sp500_df['Close'] - self.sp500_df['Open'])/self.sp500_df['Open']
         # Create y
-        df['label'] = self.create_labels(df['change'])
+        self.create_labels(df)
         features = data_prep_params.features
         columnsToDrop = [c for c in df.columns if c not in features and c != 'label']
         df = df.drop(axis=1, columns=columnsToDrop)
@@ -86,29 +85,25 @@ class DataChef:
 
 
     def prepare_prediction_data(self, df, num_time_steps, scaler, features):
-        df['change'] = self.calculate_price_change_ts(df)
-        df['sp500_change'] = self.sp500_daily_changes
+        df['change'] = 100 * (df['Close'] - df['Open']) / df['Open']
+        df['sp500_change'] = 100 * (self.sp500_df['Close'] - self.sp500_df['Open']) / self.sp500_df['Open']
         df = df.tail(num_time_steps+4)[features]
         df[features] = scaler.transform(df)
         latest_row = self.dataframe_to_supervised(df, num_time_steps, features).tail(1)
         return latest_row
 
 
-    def create_labels(self, series):
+    def create_labels(self, df):
+        df['CloseAfterXDays'] = df['Close'].shift(-1 * self.num_days_forward_to_predict, axis=0)
+        df.dropna(inplace=True)
+        x_days_change = 100 * (df['CloseAfterXDays'] - df['Open']) / df['Open']
         # 0 Hold => -ve threshold < % Change < +ve threshold
         # 1 Buy => % Change > +ve threshold
         # -1 Sell => % Change < -ve threshold
-        label_ts = series.apply(
+        df['label'] = x_days_change.apply(
             lambda x: self.stockActions_to_label['Buy'] if x > self.labelling_positive_threshold
             else self.stockActions_to_label['Sell'] if x < -1 * self.labelling_negative_threshold
             else self.stockActions_to_label['Hold'])
-        return label_ts
-
-    def calculate_price_change_ts(self, df: pd.DataFrame):
-        df['CloseAfterXDays'] = df['Close'].shift(-1 * self.num_days_forward_to_predict, axis=0)
-        df.dropna(inplace=True)
-        change_series = 100 * (df['CloseAfterXDays'] - df['Open'])/df['Open']
-        return change_series
 
     @staticmethod
     def __split_train_validation_test(df, train_fraction, val_fraction):

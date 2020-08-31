@@ -1,12 +1,12 @@
-import copy
 import operator
 import os
 import pathlib
-import pandas as pd
+
 from tensorflow.python.keras.models import load_model
 from data_chef import DataChef
 from dtos import ModelHyperparameters, DataPrepParameters, ModelContainer, Metric
 from model_evaluator import ModelEvaluator
+from stockatron_logger import StockatronLogger
 from trainer import Trainer
 from pickle import dump, load
 from datetime import date, timedelta
@@ -25,18 +25,22 @@ class StockatronCore:
         self.num_days_forward_to_predict = 20
         self.data_chef = DataChef(sp500_ticker, self.num_days_forward_to_predict)
         self.metric = Metric.precision
+        self.logger = StockatronLogger(self.data_chef)
+        # prepare directories
+        pathlib.Path('models').mkdir(exist_ok=True)
+        pathlib.Path('runs').mkdir(exist_ok=True)
+        pathlib.Path('training_plots').mkdir(exist_ok=True)
 
     def train_model(self, symbol):
         models = []
         df = yf.get_ticker(symbol, start_date=self.start_date)
-        trainer = Trainer()
-        num_time_steps_to_try = [5, 10]
-        print(f'Training {symbol}')
+        num_time_steps_to_try = [10]
+        print(f'-------- {symbol} -----------')
         for num_time_steps in num_time_steps_to_try:
             data_prep_params = DataPrepParameters(scaler=StandardScaler(), num_time_steps=num_time_steps, features=['change', 'sp500_change'])
             data = self.data_chef.prepare_model_data(df, data_prep_params)
-            for batch_size in [5, 20]: # will try several batch sizes as stateless LSTM's only keep state/context within a batch so it's an important hyperparameter to explore
-                hyperparams = ModelHyperparameters( epochs=15,
+            for batch_size in [20]: # can try more batch sizes as stateless LSTM's only keep state/context within a batch so it's an important hyperparameter to explore
+                hyperparams = ModelHyperparameters( epochs=40,
                                                     number_hidden_layers=2,
                                                     number_units_in_hidden_layers=25,
                                                     hidden_activation_fn='tanh',
@@ -44,28 +48,42 @@ class StockatronCore:
                                                     dropout=0,
                                                     kernel_initializer="glorot_uniform",
                                                     batch_size=batch_size)
-                model = trainer.train_model(data_prep_params, data.train_X, data.train_y, hyperparams)
-                train_score = ModelEvaluator.evaluate(model, data.train_X, data.train_y, self.metric)
-                # Check for High Bias / Underfitting
-                if train_score < 0.8: # increase complexity of model by adding more layers and running for longer
-                    hyperparams.number_hidden_layers += 1
-                    hyperparams.epochs *=3
-                    model = trainer.train_model(data_prep_params, data.train_X, data.train_y, hyperparams)
-                    train_score = ModelEvaluator.evaluate(model, data.train_X, data.train_y, self.metric)
-                models.append(ModelContainer(model=model, hyperparameters=hyperparams, data_prep_params=data_prep_params, data=data, train_score=train_score))
-        best = max(models, key=operator.attrgetter("train_score"))
-        # Check for High Variance / Overfitting in best model
-        val_score = ModelEvaluator.evaluate(best.model, best.data.val_X, best.data.val_y, self.metric)
-        if (best.train_score - val_score) / best.train_score > 0.05:  # more than 5% -> Overfitting -> Increase Regularization
-            best.hyperparameters.dropout += 0.3
-            best.model = trainer.train_model(best.data_prep_params, best.data.train_X, best.data.train_y, best.hyperparameters)
-            best.train_score = ModelEvaluator.evaluate(best.model, best.data.train_X, best.data.train_y, self.metric)
-            best.val_score = ModelEvaluator.evaluate(best.model, best.data.val_X, best.data.val_y, self.metric)
+                model = Trainer.train_model(symbol, data_prep_params, data.train_X, data.train_y, hyperparams)
+                model_fit_container = StockatronCore.__reduce_underfitting(symbol, model, hyperparams, data, data_prep_params, self.metric)
+                models.append(model_fit_container)
+        best_fit_model_container = max(models, key=operator.attrgetter("train_score"))
+        final_model_container = StockatronCore.__reduce_overfitting(best_fit_model_container, self.metric)
         # Only now that the model has been selected, evaluate its worth using the untouched test set
-        best.test_score = ModelEvaluator.evaluate(best.model, best.data.test_X, best.data.test_y, self.metric)
-        print(f'Best Model for {symbol} has validation score={best.val_score} & test score={best.test_score}')
-        best.version = f'{symbol}_{date.today().strftime("%Y-%m-%d")}'
-        StockatronCore.__save_new_model(best)
+        final_model_container.test_score = ModelEvaluator.evaluate(symbol, final_model_container.data.test_X, final_model_container.data.test_y, self.metric)
+        print(f'Best Model for {symbol} has validation score={final_model_container.val_score} & test score={final_model_container.test_score}')
+        final_model_container.version = f'{symbol}_{date.today().strftime("%Y-%m-%d")}'
+        StockatronCore.__save_new_model(final_model_container)
+
+    @staticmethod
+    def __reduce_underfitting(symbol, model, hyperparams, data, data_prep_params, metric):
+        """ Recursive method to reduce Bias & get a better Training score for the metric """
+        train_score = ModelEvaluator.evaluate(model, data.train_X, data.train_y, metric)
+        if train_score < 0.7 and hyperparams.number_hidden_layers < 5:  # increase complexity of model by adding more layers and running for longer (up to the point of 5 hidden layers)
+            # Improving Model Fit
+            hyperparams.number_hidden_layers += 1
+            hyperparams.epochs *= round(3.5)
+            model = Trainer.train_model(symbol, data_prep_params, data.train_X, data.train_y, hyperparams)
+            StockatronCore.__reduce_underfitting(symbol, model, hyperparams, data, data_prep_params, metric)
+        else:
+            return ModelContainer(model=model, hyperparameters=hyperparams, data_prep_params=data_prep_params, data=data, train_score=train_score)
+
+    @staticmethod
+    def __reduce_overfitting(symbol, model_container, metric):
+        """ Recursive method to reduce Variance & get a better Validation score for the metric """
+        model_container.train_score = ModelEvaluator.evaluate(model_container.model, model_container.data.train_X, model_container.data.train_y, metric)
+        model_container.val_score = ModelEvaluator.evaluate(model_container.model, model_container.data.val_X, model_container.data.val_y, metric)
+        if (model_container.train_score - model_container.val_score) / model_container.train_score > 0.05 and model_container.hyperparams.dropout < 0.85:  # more than 5% -> Overfitting -> Increase Regularization
+            # Improving Model Generalization
+            model_container.hyperparams.dropout += 0.4
+            model_container.model = Trainer.train_model(symbol, model_container.data_prep_params, model_container.data.train_X, model_container.data.train_y, model_container.hyperparams)
+            StockatronCore.__reduce_overfitting(symbol, model_container, metric)
+        else:
+            return model_container
 
     @staticmethod
     def __save_new_model(model_container):
@@ -91,7 +109,11 @@ class StockatronCore:
             prediction_index = np.argmax(model.predict(x), axis=-1)[0]
             prediction = self.data_chef.index_to_value[prediction_index]
             print(f'{symbol} expected to be: {prediction}')
-            StockatronCore.__record_run(symbol, model_details, prediction)
+            self.logger.record_run(symbol, model_details, prediction)
+
+    def analyse_latest_model(self, symbol):
+        pass
+        # TODO: Get latest model name and calculate Accuracy for each class separately
 
     # Returns the name of the latest file containing the substring
     @staticmethod
@@ -99,27 +121,3 @@ class StockatronCore:
         list_of_files = glob.glob(f'{path}/**/{file_name_substring}*', recursive=True)
         latest_file = max(list_of_files, key=os.path.getctime)
         return latest_file
-
-    @staticmethod
-    def __record_run(symbol, model_details:ModelContainer, prediction):
-        file_dir = 'runs'
-        file_name = 'stockatron_runs.csv'
-        stats_file = os.path.join(file_dir, file_name)
-
-        data = {'Symbol': symbol, 'Run Date': date.today().strftime("%Y-%m-%d"), 'Model': model_details.version, 'Model Test Score': model_details.test_score, 'Prediction': prediction}
-
-        if os.path.exists(stats_file):
-            df = pd.read_csv(stats_file)
-            df.append(data, ignore_index=True)
-        else:
-            df = pd.DataFrame(data, index=[0])
-
-        df.to_csv(stats_file)
-
-    @staticmethod
-    def __update_predictions_with_actual(symbol, date, actual):
-        pass
-
-
-
-

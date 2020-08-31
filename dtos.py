@@ -35,10 +35,10 @@ class DataContainer:
 class ModelContainer:
     model: Sequential
     hyperparameters: ModelHyperparameters
-    train_score: float
     data_prep_params: DataPrepParameters
     data: DataContainer
     version: str = None
+    train_score: float = 0.0
     val_score: float = 0.0
     test_score: float = 0.0
 
