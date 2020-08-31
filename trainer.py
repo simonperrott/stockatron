@@ -25,7 +25,7 @@ class Trainer:
                             shuffle=False)
         print(f'--- --- --- {symbol} --- --- ---')
         print(f'Timesteps: {data_prep_params.num_time_steps} Batch size: {hyperparams.batch_size}, epochs: {hyperparams.epochs} & dropout: {hyperparams.dropout} ->')
-        Trainer.plot_model_loss(symbol, history)
+        Trainer.plot_model_loss(symbol, history, hyperparams)
         return model
 
 
@@ -53,11 +53,12 @@ class Trainer:
         return model
 
     @staticmethod
-    def plot_model_loss(symbol, history):
+    def plot_model_loss(symbol, history, hyperparams):
         plot_dir = pathlib.Path(f'training_plots/{symbol}')
         plot_dir.mkdir(exist_ok=True)
         pyplot.figure(figsize=(7, 5))
         pyplot.plot(history.history['loss'], label='training loss')
         pyplot.legend()
+        pyplot.title(f'{symbol} with {hyperparams.epochs} epochs & {hyperparams.batch_size} batch size & {hyperparams.dropout} dropout')
         pyplot.savefig(f'{plot_dir}/{time.time()}.png')
         pyplot.close()

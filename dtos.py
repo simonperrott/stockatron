@@ -34,7 +34,7 @@ class DataContainer:
 @dataclass
 class ModelContainer:
     model: Sequential
-    hyperparameters: ModelHyperparameters
+    hyperparams: ModelHyperparameters
     data_prep_params: DataPrepParameters
     data: DataContainer
     version: str = None
