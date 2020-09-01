@@ -9,16 +9,17 @@ from dtos import DataContainer
 
 class DataChef:
 
+    stockActions_to_label = {'Sell': -1, 'Hold': 0, 'Buy': 1}
+    label_to_stockAction = {v: k for k, v in stockActions_to_label.items()}
+    index_to_value = {i: v for i, (k, v) in enumerate(stockActions_to_label.items())}
+    value_to_index = {v: i for i, (k, v) in enumerate(stockActions_to_label.items())}
+
     def __init__(self, sp500_df: pd.DataFrame, num_days_forward_to_predict):
         #self.data_prep_params = data_prep_params
         self.num_days_forward_to_predict = num_days_forward_to_predict
         self.labelling_positive_threshold = 10.0
         self.labelling_negative_threshold = 5.0
         self.sp500_df = sp500_df
-        # Create Lookups for labels
-        self.stockActions_to_label = {'Sell': -1, 'Hold': 0, 'Buy': 1}
-        self.label_to_stockAction = {v: k for k, v in self.stockActions_to_label.items()}
-        self.index_to_value = {i: v for i, (k, v) in enumerate(self.stockActions_to_label.items())}
 
 
     def prepare_model_data(self, df, data_prep_params):
@@ -32,7 +33,7 @@ class DataChef:
         df = df.drop(axis=1, columns=columnsToDrop)
 
         # Split data
-        train, validation, test = self.__split_train_validation_test(df, 0.8, 0.1)
+        train, validation, test = self.__split_train_validation_test(df, 0.7, 0.15)
 
         # Scale features
         data_prep_params.scaler.fit(train[features])
@@ -101,9 +102,9 @@ class DataChef:
         # 1 Buy => % Change > +ve threshold
         # -1 Sell => % Change < -ve threshold
         df['label'] = x_days_change.apply(
-            lambda x: self.stockActions_to_label['Buy'] if x > self.labelling_positive_threshold
-            else self.stockActions_to_label['Sell'] if x < -1 * self.labelling_negative_threshold
-            else self.stockActions_to_label['Hold'])
+            lambda x: DataChef.stockActions_to_label['Buy'] if x > self.labelling_positive_threshold
+            else DataChef.stockActions_to_label['Sell'] if x < -1 * self.labelling_negative_threshold
+            else DataChef.stockActions_to_label['Hold'])
 
     @staticmethod
     def __split_train_validation_test(df, train_fraction, val_fraction):

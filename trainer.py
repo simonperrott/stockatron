@@ -34,7 +34,7 @@ class Trainer:
         # Create Network Topography
         model = Sequential()
         # First hidden layer
-        model.add(LSTM(model_hyperparameters.number_units_in_hidden_layers,
+        model.add(LSTM(model_hyperparameters.number_units_in_hidden_layers*2,
                        activation=model_hyperparameters.hidden_activation_fn,
                        dropout=model_hyperparameters.dropout,
                        return_sequences=True if model_hyperparameters.number_hidden_layers > 1 else False,
@@ -44,7 +44,6 @@ class Trainer:
         for l in range(2, model_hyperparameters.number_hidden_layers+1):
             model.add(LSTM(model_hyperparameters.number_units_in_hidden_layers,
                            activation=model_hyperparameters.hidden_activation_fn,
-                           dropout=model_hyperparameters.dropout,
                            return_sequences = True if l != model_hyperparameters.number_hidden_layers else False,
                            kernel_initializer=model_hyperparameters.kernel_initializer))
         # The Output layer
@@ -60,5 +59,5 @@ class Trainer:
         pyplot.plot(history.history['loss'], label='training loss')
         pyplot.legend()
         pyplot.title(f'{symbol} with {hyperparams.epochs} epochs & {hyperparams.batch_size} batch size & {hyperparams.dropout} dropout')
-        pyplot.savefig(f'{plot_dir}/{time.time()}.png')
+        pyplot.savefig(f'{plot_dir}/{time.time()}_{hyperparams.epochs}epochs_dropout{hyperparams.dropout}.png')
         pyplot.close()
