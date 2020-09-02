@@ -22,7 +22,7 @@ class StockatronCore:
         # Retrieve the S&P 500 Index timeseries data
         self.start_date = start_date
         sp500_ticker = yf.get_ticker('^GSPC', start_date=self.start_date)
-        self.num_days_forward_to_predict = 20
+        self.num_days_forward_to_predict = 5
         self.data_chef = DataChef(sp500_ticker, self.num_days_forward_to_predict)
         self.metric = Metric.precision
         self.logger = StockatronLogger(self.data_chef)
@@ -42,16 +42,16 @@ class StockatronCore:
         for num_time_steps in num_time_steps_to_try:
             data_prep_params = DataPrepParameters(scaler=StandardScaler(), num_time_steps=num_time_steps, features=['change', 'sp500_change'])
             data = self.data_chef.prepare_model_data(df, data_prep_params)
-            for batch_size in [5]: # can try more batch sizes as stateless LSTM's only keep state/context within a batch so it's an important hyperparameter to explore
-                hyperparams = ModelHyperparameters( epochs=250,
+            for batch_size in [1, 5]: # can try more batch sizes as stateless LSTM's only keep state/context within a batch so it's an important hyperparameter to explore
+                hyperparams = ModelHyperparameters( epochs=100,
                                                     number_hidden_layers=2,
-                                                    number_units_in_hidden_layers=30,
+                                                    number_units_in_hidden_layers=20,
                                                     hidden_activation_fn='tanh',
                                                     optimizer='adam',
                                                     dropout=0,
                                                     kernel_initializer="glorot_uniform",
                                                     batch_size=batch_size)
-                model = Trainer.train_model(symbol, data_prep_params, data.train_X, data.train_y, hyperparams)
+                model = Trainer.train_model(symbol, data_prep_params, data, hyperparams)
                 model_container = StockatronCore.__reduce_underfitting(symbol, model, hyperparams, data, data_prep_params)
                 models.append(model_container)
                 if model_container.train_score > 0.85:
@@ -74,7 +74,7 @@ class StockatronCore:
                 hyperparams.epochs += 100
             elif hyperparams.number_hidden_layers < 5:  # if still not meeting the training score threshold then increase complexity of model
                 hyperparams.number_hidden_layers += 1
-            model = Trainer.train_model(symbol, data_prep_params, data.train_X, data.train_y, hyperparams)
+            model = Trainer.train_model(symbol, data_prep_params, data, hyperparams)
             return StockatronCore.__reduce_underfitting(symbol, model, hyperparams, data, data_prep_params)
         else:
             return ModelContainer(model=model, hyperparams=hyperparams, data_prep_params=data_prep_params, data=data, train_score=train_score)
@@ -88,10 +88,10 @@ class StockatronCore:
         print('On Test data...')
         model_container.val_score = ModelEvaluator.evaluate(model_container.model, model_container.data.val_X, model_container.data.val_y)
         print(f'Train score: {model_container.train_score} & Validation score: {model_container.val_score}')
-        if (model_container.train_score - model_container.val_score)/model_container.train_score > 0.15 and model_container.hyperparams.dropout < 0.55 and model_container.train_score > 0.6:
+        if (model_container.train_score - model_container.val_score)/model_container.train_score > 0.15 and model_container.hyperparams.dropout < 0.55 and model_container.train_score > 0.65:
         # Try improving generalisation if difference between training & validation score should be less than 10% (but if validation score is good then don't and don't continue if validation score is below threshold)
             model_container.hyperparams.dropout += 0.2
-            model_container.model = Trainer.train_model(symbol, model_container.data_prep_params, model_container.data.train_X, model_container.data.train_y, model_container.hyperparams)
+            model_container.model = Trainer.train_model(symbol, model_container.data_prep_params, model_container.data, model_container.hyperparams)
             return StockatronCore.__reduce_overfitting(symbol, model_container)
         else:
             return model_container

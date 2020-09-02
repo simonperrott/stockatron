@@ -19,7 +19,7 @@ class ModelEvaluator:
         val_for_sell = DataChef.value_to_index[-1]
         sell_recall, num_actual_sell = ModelEvaluator.calculate_recall(model, X, y, val_for_sell, 'Sell')
 
-        weighted_average_recall = ((num_actual_buy * buy_recall) + (num_actual_sell * sell_recall)) / (num_actual_sell + num_actual_sell)
+        weighted_average_recall = ((num_actual_buy * buy_recall) + (num_actual_sell * sell_recall)) / (num_actual_buy + num_actual_sell)
         print(f'Weight Recall Score: {weighted_average_recall}')
         return weighted_average_recall
 
